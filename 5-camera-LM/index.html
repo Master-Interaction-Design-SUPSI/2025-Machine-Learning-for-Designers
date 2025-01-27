@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Image Analysis</title>
+  </head>
+  <body>
+    <video id="video" autoplay style="width: 640px; height: 480px"></video>
+    <canvas id="canvas" style="display: none"></canvas>
+    <div
+      id="progress-bar"
+      style="width: 640px; height: 20px; background-color: #ddd; margin: 10px 0"
+    >
+      <div
+        id="progress"
+        style="
+          width: 0%;
+          height: 100%;
+          background-color: #4caf50;
+          transition: width 0.1s linear;
+        "
+      ></div>
+    </div>
+    <div id="result"></div>
+
+    <script>
+      // Set up video stream
+      const video = document.getElementById("video");
+      const canvas = document.getElementById("canvas");
+      const context = canvas.getContext("2d");
+
+      // Set canvas size to match video
+      canvas.width = 640;
+      canvas.height = 480;
+
+      // Get camera access
+      async function setupCamera() {
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({
+            video: true,
+          });
+          video.srcObject = stream;
+        } catch (err) {
+          console.error("Error accessing camera:", err);
+        }
+      }
+
+      // Function to update progress bar
+      function updateProgressBar(progress) {
+        document.getElementById("progress").style.width = `${progress}%`;
+      }
+
+      // Function to capture and analyze image
+      async function captureAndAnalyze() {
+        // Reset progress bar
+        updateProgressBar(0);
+
+        // Draw current video frame to canvas
+        context.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+        // Convert canvas to base64
+        const base64Image = canvas.toDataURL("image/jpeg");
+
+        // Prepare the API request
+        const requestData = {
+          model: "llava-v1.5-7b",
+          messages: [
+            {
+              role: "system",
+              content:
+                "If you see something on the line of a partially dark image, that makes no sense, return sound_on false, otherwise, if you see a red rooftop, return sound_on true",
+            },
+            {
+              role: "user",
+              content: [
+                {
+                  type: "image_url",
+                  image_url: { url: base64Image },
+                },
+              ],
+            },
+          ],
+          // this is our JSON schema
+          response_format: {
+            type: "json_schema",
+            json_schema: {
+              name: "assistant_response",
+              strict: "true",
+              schema: {
+                type: "object",
+                properties: {
+                  sound_on: {
+                    type: "boolean",
+                    description: "Whether the sound is on or off",
+                  },
+                },
+                required: ["sound_on"],
+              },
+            },
+          },
+          temperature: 0.7,
+          max_tokens: -1,
+          stream: false,
+        };
+
+        try {
+          const response = await fetch(
+            "http://10.14.104.186:1234/v1/chat/completions",
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify(requestData),
+            }
+          );
+
+          const result = await response.json();
+          document.getElementById(
+            "result"
+          ).innerHTML = `<p>${result.choices[0].message.content}</p>`;
+        } catch (error) {
+          console.error("Error:", error);
+          document.getElementById("result").textContent =
+            "Error: " + error.message;
+        }
+      }
+
+      // Initialize camera and start periodic capture
+      setupCamera();
+
+      // Modified interval handling to include progress bar
+      const interval = 8000; // 8 seconds
+      setInterval(captureAndAnalyze, interval);
+
+      // Update progress bar every 80ms (100 steps for smooth animation)
+      setInterval(() => {
+        const currentTime = Date.now();
+        const progress = ((currentTime % interval) / interval) * 100;
+        updateProgressBar(progress);
+      }, 80);
+    </script>
+  </body>
+</html>
