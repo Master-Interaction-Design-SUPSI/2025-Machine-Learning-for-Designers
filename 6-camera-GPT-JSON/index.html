@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Document</title>
+  </head>
+  <body>
+    <video
+      id="cameraFeed"
+      autoplay
+      style="width: 100%; max-width: 500px"
+    ></video>
+    <canvas id="canvas" style="display: none"></canvas>
+    <div id="result"></div>
+
+    <script>
+      const API_KEY = "";
+      let stream;
+
+      async function startCamera() {
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({ video: true });
+          const video = document.getElementById("cameraFeed");
+          video.srcObject = stream;
+          // Start analyzing images every 8 seconds
+          setInterval(analyzeImages, 8000);
+        } catch (err) {
+          console.error("Error accessing camera:", err);
+        }
+      }
+
+      async function analyzeImages() {
+        const video = document.getElementById("cameraFeed");
+        const canvas = document.getElementById("canvas");
+        const context = canvas.getContext("2d");
+
+        // Set canvas size to match video dimensions
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+
+        // Draw current video frame to canvas
+        context.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+        // Convert canvas to base64 image
+        const imageUrl = canvas.toDataURL("image/jpeg");
+
+        const messages = [
+          {
+            role: "user",
+            content: [
+              {
+                type: "text",
+                text: "What's in the image? Is there a person? Open the door if there is a person, otherwise, close the door",
+              },
+              {
+                type: "image_url",
+                image_url: {
+                  url: imageUrl,
+                },
+              },
+            ],
+          },
+        ];
+
+        try {
+          const response = await fetch(
+            "https://api.openai.com/v1/chat/completions",
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${API_KEY}`,
+              },
+              body: JSON.stringify({
+                model: "gpt-4o",
+                messages: messages,
+                // this is our JSON schema
+                response_format: {
+                  type: "json_schema",
+                  json_schema: {
+                    name: "assistant_response",
+                    description: "the response from the assistant",
+                    strict: true,
+                    schema: {
+                      type: "object",
+                      description: "the response from the assistant",
+                      properties: {
+                        door_open: {
+                          type: "boolean",
+                          description:
+                            "true if the door is open, false if the door is closed",
+                        },
+                      },
+                      required: ["door_open"],
+                      additionalProperties: false,
+                    },
+                  },
+                },
+                max_tokens: 300,
+              }),
+            }
+          );
+
+          const data = await response.json();
+          document.getElementById("result").textContent =
+            data.choices[0].message.content;
+        } catch (error) {
+          console.error("Error:", error);
+          document.getElementById("result").textContent =
+            "Error analyzing images";
+        }
+      }
+
+      // Start the camera when the page loads
+      startCamera();
+    </script>
+  </body>
+</html>
