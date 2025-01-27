@@ -26,7 +26,11 @@
               body: JSON.stringify({
                 model: "llava-v1.5-7b",
                 messages: [
-                  { role: "system", content: "Always answer in rhymes." },
+                  {
+                    role: "system",
+                    content:
+                      "you are a chef that know everything about cutting vegetables",
+                  },
                   { role: "user", content: userInput },
                 ],
                 temperature: 0.7,

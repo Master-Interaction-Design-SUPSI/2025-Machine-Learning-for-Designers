@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Joke Generator</title>
+  </head>
+  <body>
+    <button onclick="getJoke()">Get Weather</button>
+    <p id="jokeDisplay"></p>
+
+    <script>
+      async function getJoke() {
+        const response = await fetch(
+          "http://10.14.104.186:1234/v1/chat/completions",
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              model: "llava-v1.5-7b",
+              messages: [
+                // this is what the agent does
+                {
+                  role: "system",
+                  content:
+                    "You are a home assistant, when you see a person, you open the door and turn on the light and write a welcome message, when you don't see anyone, you close the door, switch off the light and reply 'zzz' as welcome message",
+                },
+
+                // this is our prompt
+                {
+                  role: "user",
+                  content: "I don't see a person",
+                },
+              ],
+
+              // this is our JSON schema
+              response_format: {
+                type: "json_schema",
+                json_schema: {
+                  name: "assistant_response",
+                  strict: "true",
+                  schema: {
+                    type: "object",
+                    properties: {
+                      door_open: {
+                        type: "boolean",
+                      },
+                      welcome_message: {
+                        type: "string",
+                      },
+                      light_on: {
+                        type: "boolean",
+                      },
+                    },
+                    required: ["door_open", "welcome_message", "light_on"],
+                  },
+                },
+              },
+              temperature: 0.7,
+              max_tokens: 100,
+              stream: false,
+            }),
+          }
+        );
+
+        const data = await response.json();
+        // const jokeContent = JSON.parse(data.choices[0].message.content);
+        const jokeContent = data.choices[0].message.content;
+        document.getElementById("jokeDisplay").textContent = jokeContent;
+      }
+    </script>
+  </body>
+</html>
