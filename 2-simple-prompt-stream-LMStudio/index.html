@@ -5,12 +5,14 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Chat with AI</title>
   </head>
+
   <body>
     <input type="text" id="userInput" placeholder="Type your message..." />
     <button onclick="sendMessage()">Send</button>
     <p id="response"></p>
 
     <script>
+      const APIKEY = "";
       async function sendMessage() {
         const userInput = document.getElementById("userInput").value;
         const responseElement = document.getElementById("response");
@@ -22,8 +24,7 @@
               method: "POST",
               headers: {
                 "Content-Type": "application/json",
-                Authorization:
-                  "Bearer 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",
+                Authorization: `Bearer ${APIKEY}`,
               },
               body: JSON.stringify({
                 model: "gpt-4o",
