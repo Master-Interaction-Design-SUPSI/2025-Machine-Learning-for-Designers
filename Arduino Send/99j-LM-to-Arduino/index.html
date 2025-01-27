@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Send Data to Arduino</title>
+</head>
+<body>
+    <h1>Send Data to Arduino</h1>
+    <form id="arduinoForm">
+        <label for="dataInput">Enter Data:</label>
+        <input type="text" id="dataInput" name="dataInput">
+        <button type="button" onclick="sendData()">Send</button>
+    </form>
+    <button type="button" onclick="openSerialPort()">Open Serial Port</button>
+
+    <script>
+        let port;
+        let writer;
+
+        function openSerialPort() {
+            if (navigator.serial) {
+                navigator.serial.requestPort().then(selectedPort => {
+                    port = selectedPort;
+                    return port.open({ baudRate: 115200 });
+                }).then(() => {
+                    const encoder = new TextEncoderStream();
+                    const writableStreamClosed = encoder.readable.pipeTo(port.writable);
+                    writer = encoder.writable.getWriter();
+                    console.log('Serial port opened');
+                }).catch(error => {
+                    console.error('There was an error opening the serial port:', error);
+                });
+            } else {
+                console.error('Web Serial API not supported.');
+            }
+        }
+
+        function sendData() {
+            const data = document.getElementById('dataInput').value;
+            if (data) {
+                sendToArduino(data);
+            } else {
+                alert('Please enter some data.');
+            }
+        }
+
+        function sendToArduino(data) {
+            if (writer) {
+                writer.write(data).then(() => {
+                    console.log('Data sent to Arduino:', data);
+                }).catch(error => {
+                    console.error('Error writing to the serial port:', error);
+                });
+            } else {
+                console.error('Serial port is not open.');
+            }
+        }
+    </script>
+</body>
+</html>
