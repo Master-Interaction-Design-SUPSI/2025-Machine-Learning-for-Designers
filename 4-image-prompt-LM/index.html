@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Image Analysis</title>
+  </head>
+  <body>
+    <form id="imageForm">
+      <input type="file" id="imageInput" accept="image/*" required />
+      <button type="submit">Analyze Image</button>
+    </form>
+    <div id="result"></div>
+
+    <script>
+      document
+        .getElementById("imageForm")
+        .addEventListener("submit", async (e) => {
+          e.preventDefault();
+
+          const file = document.getElementById("imageInput").files[0];
+          if (!file) {
+            alert("Please select an image");
+            return;
+          }
+
+          // Convert image to base64
+          const reader = new FileReader();
+          reader.readAsDataURL(file);
+
+          reader.onload = async () => {
+            const base64Image = reader.result;
+
+            // Prepare the API request
+            const requestData = {
+              model: "llava-v1.5-7b",
+              messages: [
+                {
+                  role: "user",
+                  content: [
+                    {
+                      type: "text",
+                      text: "What is this image?",
+                    },
+                    {
+                      type: "image_url",
+                      image_url: { url: base64Image },
+                    },
+                  ],
+                },
+              ],
+              temperature: 0.7,
+              max_tokens: -1,
+              stream: false,
+            };
+
+            try {
+              const response = await fetch(
+                "http://10.14.104.186:1234/v1/chat/completions",
+                {
+                  method: "POST",
+                  headers: {
+                    "Content-Type": "application/json",
+                  },
+                  body: JSON.stringify(requestData),
+                }
+              );
+
+              const result = await response.json();
+              document.getElementById(
+                "result"
+              ).innerHTML = `<p>${result.choices[0].message.content}</p>`;
+            } catch (error) {
+              console.error("Error:", error);
+              document.getElementById("result").textContent =
+                "Error: " + error.message;
+            }
+          };
+        });
+    </script>
+  </body>
+</html>
