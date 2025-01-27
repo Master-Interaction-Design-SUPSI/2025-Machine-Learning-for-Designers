@@ -1,0 +1,33 @@
+<!-- simple models get from LM Studio -->
+
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Document</title>
+  </head>
+  <body>
+    <!-- Element to display the API response or error -->
+    <p id="result"></p>
+
+    <script>
+      // Make a GET request to fetch available models from the API
+      fetch("http://10.14.104.186:1234/v1/models/")
+        // Convert the response to JSON format
+        .then((response) => response.json())
+        // Display the formatted JSON data in the result paragraph
+        .then((data) => {
+          document.getElementById("result").textContent = JSON.stringify(
+            data,
+            null, // No replacer function
+            2 // Number of spaces for indentation
+          );
+        })
+        // If there's an error, display it in the result paragraph
+        .catch((error) => {
+          document.getElementById("result").textContent = "Error: " + error;
+        });
+    </script>
+  </body>
+</html>
