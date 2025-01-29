@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Document</title>
+  </head>
+  <body>
+    <div>
+      <label for="apiKey">API Key:</label>
+      <input type="password" id="apiKey" value="" />
+    </div>
+    <div>
+      <label for="voiceId">Voice ID:</label>
+      <input type="text" id="voiceId" value="JBFqnCBsd6RMkjVDRZzb" />
+    </div>
+    <div>
+      <label for="textContent">Text to speak:</label>
+      <textarea id="textContent">
+The first move is what sets everything in motion.</textarea
+      >
+    </div>
+    <button id="generateAudio">Generate and Play Audio</button>
+    <script>
+      document.getElementById("generateAudio").addEventListener("click", () => {
+        const apiKey = document.getElementById("apiKey").value;
+        const voiceId = document.getElementById("voiceId").value;
+        const text = document.getElementById("textContent").value;
+        const apiUrl = `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}?output_format=mp3_44100_128`;
+
+        const headers = {
+          "Content-Type": "application/json",
+          "xi-api-key": apiKey,
+        };
+
+        const body = {
+          text: text,
+          model_id: "eleven_multilingual_v2",
+        };
+
+        fetch(apiUrl, {
+          method: "POST",
+          headers: headers,
+          body: JSON.stringify(body),
+        })
+          .then((response) => response.blob())
+          .then((blob) => {
+            const audioUrl = URL.createObjectURL(blob);
+            const audio = new Audio(audioUrl);
+            audio.play();
+          })
+          .catch((error) => console.error("Error:", error));
+      });
+    </script>
+  </body>
+</html>
