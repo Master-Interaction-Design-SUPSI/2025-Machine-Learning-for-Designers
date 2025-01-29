@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Web Serial Image Demo</title>
+  </head>
+  <body>
+    <input type="file" id="fileInput" accept="image/*" />
+    <button id="connectBtn">Connect to Arduino</button>
+    <button id="sendBtn">Send to Arduino</button>
+
+    <script>
+      let port;
+      let writer;
+      let imageBytes; // We will store the final BMP/bit array here
+
+      // Basic threshold function
+      function thresholdImageData(ctx, width, height) {
+        const imageData = ctx.getImageData(0, 0, width, height);
+        const pixels = imageData.data;
+        for (let i = 0; i < pixels.length; i += 4) {
+          const r = pixels[i];
+          const g = pixels[i + 1];
+          const b = pixels[i + 2];
+          // Simple average
+          const avg = (r + g + b) / 3;
+          // If average is below 128 => black, else white
+          const bw = avg < 128 ? 0 : 255;
+          pixels[i] = bw; // R
+          pixels[i + 1] = bw; // G
+          pixels[i + 2] = bw; // B
+          // alpha can stay the same or set to 255
+          // pixels[i + 3] = 255;
+        }
+        ctx.putImageData(imageData, 0, 0);
+      }
+
+      document
+        .getElementById("fileInput")
+        .addEventListener("change", function (e) {
+          const file = e.target.files[0];
+          const reader = new FileReader();
+          reader.onload = function (evt) {
+            const img = new Image();
+            img.onload = function () {
+              const desiredWidth = 384;
+              const aspectRatio = img.height / img.width;
+              const desiredHeight = Math.round(desiredWidth * aspectRatio);
+
+              const canvas = document.createElement("canvas");
+              canvas.width = desiredWidth;
+              canvas.height = desiredHeight;
+              const ctx = canvas.getContext("2d");
+              ctx.drawImage(img, 0, 0, desiredWidth, desiredHeight);
+
+              // Now threshold
+              thresholdImageData(ctx, desiredWidth, desiredHeight);
+
+              // Now build the final byte array
+              imageBytes = buildImageBytes(ctx, desiredWidth, desiredHeight);
+              console.log("Image bytes ready:", imageBytes.length);
+            };
+            img.src = evt.target.result;
+          };
+          reader.readAsDataURL(file);
+        });
+
+      // Request a port, open it, set up the writer
+      document
+        .getElementById("connectBtn")
+        .addEventListener("click", async () => {
+          try {
+            // Request user to select a serial port
+            port = await navigator.serial.requestPort();
+            // Open the port at 9600 baud
+            await port.open({ baudRate: 9600 });
+            writer = port.writable.getWriter();
+            console.log("Port opened");
+          } catch (err) {
+            console.error("Failed to open port", err);
+          }
+        });
+
+      // Send the image bytes to Arduino
+      document.getElementById("sendBtn").addEventListener("click", async () => {
+        if (!writer || !imageBytes) {
+          alert("Make sure you're connected and an image is processed!");
+          return;
+        }
+        try {
+          // Send length first (optional, but helps with reading on Arduino)
+          const lengthBuffer = new Uint8Array(4);
+          const len = imageBytes.length;
+          lengthBuffer[0] = len & 0xff;
+          lengthBuffer[1] = (len >> 8) & 0xff;
+          lengthBuffer[2] = (len >> 16) & 0xff;
+          lengthBuffer[3] = (len >> 24) & 0xff;
+          await writer.write(lengthBuffer);
+
+          // Then send image data in chunks
+          await writer.write(new Uint8Array(imageBytes));
+          console.log("Data sent!");
+        } catch (err) {
+          console.error("Error sending data", err);
+        }
+      });
+
+      function buildImageBytes(ctx, width, height) {
+        // This is your “generateCHeader” logic adapted to produce a byte array,
+        // instead of producing a .h string.
+
+        // Example skeleton:
+        const rowBytes = Math.ceil(width / 8);
+        const totalBytes = rowBytes * height;
+        const byteArray = new Uint8Array(totalBytes);
+
+        const imageData = ctx.getImageData(0, 0, width, height).data;
+        let byteIndex = 0;
+
+        for (let y = 0; y < height; y++) {
+          for (let x = 0; x < rowBytes; x++) {
+            let b = 0;
+            for (let bit = 0; bit < 8; bit++) {
+              const pixelIndex = (y * width + (x * 8 + bit)) * 4;
+              if (x * 8 + bit < width) {
+                // 0 means black in your threshold
+                if (imageData[pixelIndex] === 0) {
+                  b |= 1 << (7 - bit);
+                }
+              }
+            }
+            byteArray[byteIndex++] = b;
+          }
+        }
+
+        return byteArray;
+      }
+    </script>
+  </body>
+</html>

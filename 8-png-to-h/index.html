@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Image to C Header Converter</title>
+  </head>
+  <body>
+    <input type="file" id="fileInput" accept="image/*" />
+    <button onclick="processImage()">Convert to .h</button>
+
+    <script>
+      let selectedFile;
+
+      document
+        .getElementById("fileInput")
+        .addEventListener("change", function (event) {
+          selectedFile = event.target.files[0];
+        });
+
+      function processImage() {
+        if (!selectedFile) {
+          alert("Please select an image file first.");
+          return;
+        }
+
+        const reader = new FileReader();
+        reader.onload = function (event) {
+          const img = new Image();
+          img.onload = function () {
+            const canvas = document.createElement("canvas");
+            const ctx = canvas.getContext("2d");
+
+            // Set canvas size to image dimensions
+            canvas.width = img.width;
+            canvas.height = img.height;
+            ctx.drawImage(img, 0, 0);
+
+            // Convert to black & white
+            const imageData = ctx.getImageData(0, 0, img.width, img.height);
+            const pixels = imageData.data;
+
+            for (let i = 0; i < pixels.length; i += 4) {
+              let avg = (pixels[i] + pixels[i + 1] + pixels[i + 2]) / 3;
+              let bw = avg < 128 ? 0 : 255; // Thresholding
+              pixels[i] = pixels[i + 1] = pixels[i + 2] = bw;
+            }
+            ctx.putImageData(imageData, 0, 0);
+
+            // Generate C header content
+            const headerContent = generateCHeader(img.width, img.height, ctx);
+            downloadFile(headerContent, "image.h");
+          };
+          img.src = event.target.result;
+        };
+        reader.readAsDataURL(selectedFile);
+      }
+
+      function generateCHeader(width, height, ctx) {
+        let rowBytes = Math.ceil(width / 8);
+        let totalBytes = rowBytes * height;
+        let basename = "converted_image"; // You can extract file name if needed
+
+        let output = `#ifndef _${basename}_h_\n#define _${basename}_h_\n\n`;
+        output += `#define ${basename}_width  ${width}\n`;
+        output += `#define ${basename}_height ${height}\n\n`;
+        output += `static const uint8_t PROGMEM ${basename}_data[] = {\n`;
+
+        let imageData = ctx.getImageData(0, 0, width, height).data;
+        let bytesOnLine = 0;
+
+        for (let y = 0; y < height; y++) {
+          for (let x = 0; x < rowBytes; x++) {
+            let sum = 0;
+            for (let bit = 0; bit < 8; bit++) {
+              let pixelIndex = (y * width + (x * 8 + bit)) * 4;
+              if (x * 8 + bit < width) {
+                // Avoid reading out of bounds
+                if (imageData[pixelIndex] === 0) {
+                  // If pixel is black
+                  sum |= 1 << (7 - bit);
+                }
+              }
+            }
+            if (bytesOnLine >= 10) {
+              output += "\n ";
+              bytesOnLine = 0;
+            }
+            output += ` 0x${sum.toString(16).padStart(2, "0").toUpperCase()},`;
+            bytesOnLine++;
+          }
+        }
+
+        output = output.slice(0, -1); // Remove last comma
+        output += "\n};\n\n";
+        output += `#endif // _${basename}_h_\n`;
+
+        return output;
+      }
+
+      function downloadFile(content, filename) {
+        const blob = new Blob([content], { type: "text/plain" });
+        const link = document.createElement("a");
+        link.href = URL.createObjectURL(blob);
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      }
+    </script>
+  </body>
+</html>
