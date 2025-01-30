@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Web Serial Image Demo</title>
+    <style>
+      .image-generation {
+        margin-top: 20px;
+        text-align: center;
+      }
+
+      .image-container {
+        margin-top: 20px;
+        max-width: 512px;
+        margin: 20px auto;
+      }
+
+      .image-container img {
+        max-width: 100%;
+        border-radius: 8px;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+      }
+
+      .prompt-input {
+        width: 80%;
+        max-width: 500px;
+        padding: 8px;
+        margin-bottom: 10px;
+        border: 1px solid #ccc;
+        border-radius: 4px;
+      }
+
+      /* Hide main UI until Arduino is connected */
+      #mainUI {
+        display: none;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- Arduino connection button -->
+    <div style="text-align: center; margin-top: 50px">
+      <button id="connectBtn">Connect to Arduino</button>
+    </div>
+
+    <!-- Main UI (hidden until connection is established) -->
+    <div id="mainUI">
+      <div class="container">
+        <div class="image-generation">
+          <input
+            type="text"
+            id="userInput"
+            placeholder="Enter your image prompt here..."
+            class="prompt-input"
+          />
+          <button id="generateImageBtn" class="btn">
+            Generate Image with DALL-E
+          </button>
+          <div id="imageResult" class="image-container">
+            <!-- Generated image will be displayed here -->
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script type="module">
+      import { ditherImageData, buildImageBytes } from "./imageProcessing.js";
+
+      // Replace with your actual API key
+      const apiKey = "";
+
+      let port;
+      let writer;
+      let reader;
+
+      // Connect to Arduino
+      document
+        .getElementById("connectBtn")
+        .addEventListener("click", async () => {
+          try {
+            // Request user to select a serial port
+            port = await navigator.serial.requestPort();
+            // Open the port at 9600 baud
+            await port.open({ baudRate: 9600 });
+            writer = port.writable.getWriter();
+
+            // Set up the reader
+            reader = port.readable.getReader();
+
+            // Start reading loop
+            readLoop();
+
+            console.log("Port opened");
+
+            // Once connected, reveal the main UI
+            document.getElementById("mainUI").style.display = "block";
+          } catch (err) {
+            console.error("Failed to open port", err);
+            alert(
+              "Failed to open port. Check your connection and permissions."
+            );
+          }
+        });
+
+      // Add this new function to handle incoming serial data
+      async function readLoop() {
+        while (true) {
+          try {
+            const { value, done } = await reader.read();
+            if (done) {
+              reader.releaseLock();
+              break;
+            }
+            // Convert the received data to a string
+            const string = new TextDecoder().decode(value);
+            console.log("Received from Arduino:", string);
+          } catch (error) {
+            console.error("Error reading from serial:", error);
+            break;
+          }
+        }
+      }
+
+      // Generate image with DALL-E
+      async function generateImage(prompt) {
+        const response = await fetch(
+          "https://api.openai.com/v1/images/generations",
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${apiKey}`,
+            },
+            body: JSON.stringify({
+              model: "dall-e-3",
+              prompt: prompt,
+              n: 1,
+              size: "1024x1024",
+              response_format: "b64_json",
+            }),
+          }
+        );
+
+        const data = await response.json();
+        const base64String = data.data[0].b64_json;
+        return base64String; // DALL-E returns the image URL in this path
+      }
+
+      // Send the image bytes to the Arduino (in chunks)
+      async function sendImageToArduino(imageBytes) {
+        if (!writer || !imageBytes) {
+          alert("Not connected or no image to send!");
+          return;
+        }
+        try {
+          // Send length first (4 bytes, little-endian)
+          const lengthBuffer = new Uint8Array(4);
+          const len = imageBytes.length;
+          lengthBuffer[0] = len & 0xff;
+          lengthBuffer[1] = (len >> 8) & 0xff;
+          lengthBuffer[2] = (len >> 16) & 0xff;
+          lengthBuffer[3] = (len >> 24) & 0xff;
+          await writer.write(lengthBuffer);
+
+          // Send image data in smaller chunks
+          const chunkSize = 64; // you can adjust this if needed
+          for (let i = 0; i < imageBytes.length; i += chunkSize) {
+            const chunk = imageBytes.slice(i, i + chunkSize);
+            await writer.write(new Uint8Array(chunk));
+
+            // Add a small delay between chunks if needed
+            await new Promise((resolve) => setTimeout(resolve, 10));
+          }
+          console.log("Data sent!");
+        } catch (err) {
+          console.error("Error sending data", err);
+        }
+      }
+
+      // Handle the "Generate Image" button click
+      document
+        .getElementById("generateImageBtn")
+        .addEventListener("click", async () => {
+          const userInput = document.getElementById("userInput").value.trim();
+          if (!userInput) {
+            alert("Please enter a prompt for the image generation");
+            return;
+          }
+
+          const imageContainer = document.getElementById("imageResult");
+          imageContainer.innerHTML = "Generating image...";
+
+          try {
+            // 1. Generate the image via DALL-E
+            const base64String = await generateImage(userInput);
+
+            // 2. Display the generated image
+            imageContainer.innerHTML = `<img src="data:image/png;base64, ${base64String}" alt="Generated image">`;
+
+            // 3. Load that image in an off-screen canvas and dither it
+            const img = new Image();
+            // Cross-origin to avoid CORS issues when accessing pixel data
+            img.crossOrigin = "anonymous";
+
+            img.onload = async function () {
+              const desiredWidth = 384; // or your chosen width
+              const aspectRatio = img.height / img.width;
+              const desiredHeight = Math.round(desiredWidth * aspectRatio);
+
+              const canvas = document.createElement("canvas");
+              canvas.width = desiredWidth;
+              canvas.height = desiredHeight;
+              const ctx = canvas.getContext("2d");
+
+              // Draw the image into our canvas
+              ctx.drawImage(img, 0, 0, desiredWidth, desiredHeight);
+
+              // Dither the image data
+              ditherImageData(ctx, desiredWidth, desiredHeight);
+
+              // Build the final byte array
+              const imageBytes = buildImageBytes(
+                ctx,
+                desiredWidth,
+                desiredHeight
+              );
+              console.log("Image bytes ready:", imageBytes.length);
+
+              // 4. Send to Arduino
+              await sendImageToArduino(imageBytes);
+            };
+
+            // Trigger image loading
+            img.src = `data:image/png;base64, ${base64String}`;
+          } catch (error) {
+            console.error("Error:", error);
+            imageContainer.innerHTML =
+              "Error generating image. Please try again.";
+          }
+        });
+    </script>
+  </body>
+</html>
