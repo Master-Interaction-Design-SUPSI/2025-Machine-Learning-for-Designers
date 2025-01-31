@@ -1,48 +1,67 @@
 #include <Arduino.h>
-/*------------------------------------------------------------------------
-  Example sketch for Adafruit Thermal Printer library for Arduino.
-  Demonstrates a few text styles & layouts, bitmap printing, etc.
+#include <Adafruit_Thermal.h>
+#include <Adafruit_NeoPixel.h>
 
-  IMPORTANT: DECLARATIONS DIFFER FROM PRIOR VERSIONS OF THIS LIBRARY.
-  This is to support newer & more board types, especially ones that don't
-  support SoftwareSerial (e.g. Arduino Due).  You can pass any Stream
-  (e.g. Serial1) to the printer constructor.  See notes below.
+/*------------------------------------------------------------------------
+  This code prints incoming images on a thermal printer and toggles
+  a NeoPixel ring color based on the button press. Each button press
+  sends "pushed" over Serial to the host PC, which toggles audio
+  recording in your existing JavaScript code.
   ------------------------------------------------------------------------*/
 
-#include "Adafruit_Thermal.h"
+// ------------------- Thermal Printer Configuration -------------------
+Adafruit_Thermal printer(&Serial0);      // Using hardware Serial0
 
-Adafruit_Thermal printer(&Serial0);      // Or Serial2, Serial3, etc.
+// ------------------- NeoPixel Configuration --------------------------
+#define LED_PIN     9      // Pin for NeoPixel data line
+#define LED_COUNT   60     // Number of LEDs in the ring/strip
+Adafruit_NeoPixel strip(LED_COUNT, LED_PIN, NEO_GRB + NEO_KHZ800);
 
-uint8_t buffer[100000];
+// ------------------- Image Buffer -----------------------------------
+uint8_t  buffer[100000];
 uint32_t totalBytesToRead = 0;
-uint32_t bytesRead = 0;
-bool readingImage = false;
+uint32_t bytesRead        = 0;
+bool     readingImage     = false;
 
-const int BUTTON_PIN = 10;  // Define button pin
-bool lastButtonState = HIGH; // Track previous button state
+// ------------------- Button Configuration ---------------------------
+const int BUTTON_PIN    = 10;  // Define button pin
+bool lastButtonState    = HIGH; // Track previous button state
+
+// We'll track "recording" to decide LED color
+bool isRecording        = false;
 
 // -----------------------------------------------------------------------
-
+// Setup
+// -----------------------------------------------------------------------
 void setup() {
+  // NOTE: Some printers need 9600 baud instead of 19200. 
+  //       Make sure it matches your printer's requirements.
+  Serial.begin(9600);   // USB serial (to the PC)
+  Serial0.begin(9600);  // Hardware serial for the thermal printer
+  printer.begin();      // Init printer
 
-  // NOTE: SOME PRINTERS NEED 9600 BAUD instead of 19200, check test page.
-  Serial.begin(9600);  // Initialize SoftwareSerial
-  Serial0.begin(9600); // Use this instead if using hardware serial
-  printer.begin();        // Init printer (same regardless of serial type)
+  // Initialize button as INPUT_PULLUP (HIGH when not pressed)
+  pinMode(BUTTON_PIN, INPUT_PULLUP);
 
-  pinMode(BUTTON_PIN, INPUT_PULLUP);  // Setup button pin with internal pullup
+  // Initialize NeoPixel ring
+  strip.begin();
+  strip.setBrightness(50);
+  strip.clear();
+  strip.show();
 
-  // The following calls are in setup(), but don't *need* to be.  Use them
-  // anywhere!  They're just here so they run one time and are not printed
-  // over and over (which would happen if they were in loop() instead).
-  // Some functions will feed a line when called, this is normal.  
+  // (Optional) tiny delay to stabilize input reading
+  delay(50);
+  lastButtonState = digitalRead(BUTTON_PIN);
 }
 
+// -----------------------------------------------------------------------
+// Print the received image data on the thermal printer
+// (Assumes width=384, thus rowBytes=48, and height derived from length)
+// -----------------------------------------------------------------------
 void printImageData(uint8_t *data, uint32_t length) {
-  // If your image is always 384 wide, rowBytes = 384 / 8 = 48.
-  int width = 384;
+  int width    = 384;
   int rowBytes = width / 8;
-  int height = length / rowBytes; // derive height from total length
+  int height   = length / rowBytes;
 
   Serial.print("Printing image: width=");
   Serial.print(width);
@@ -53,60 +72,89 @@ void printImageData(uint8_t *data, uint32_t length) {
   printer.feed(2);
 }
 
-
+// -----------------------------------------------------------------------
+// Main Loop
+// -----------------------------------------------------------------------
 void loop() {
-  // Check button state
+  // ---------------------------------------------------------------------
+  // 1) BUTTON CHECK
+  // ---------------------------------------------------------------------
   bool currentButtonState = digitalRead(BUTTON_PIN);
-  
-  // Detect button press (transition from HIGH to LOW)
+
+  // Detect a rising->falling transition => "press"
   if (currentButtonState == LOW && lastButtonState == HIGH) {
+    // Send "pushed" to the PC via Serial
     Serial.println("pushed");
+
+    // Toggle our local isRecording state
+    isRecording = !isRecording;
+
+    // Simple debounce
+    delay(200);
   }
-  
-  // Update last button state
   lastButtonState = currentButtonState;
 
-  // 1. Wait for incoming data
+  // ---------------------------------------------------------------------
+  // 2) UPDATE NEOPIXELS
+  // ---------------------------------------------------------------------
+  // Red if recording, green if not (choose your own colors!)
+  if (isRecording) {
+    // Set all pixels to red
+    for (uint16_t i = 0; i < LED_COUNT; i++) {
+      strip.setPixelColor(i, strip.Color(255, 0, 0));
+    }
+  } else {
+    // Set all pixels to green
+    for (uint16_t i = 0; i < LED_COUNT; i++) {
+      strip.setPixelColor(i, strip.Color(0, 255, 0));
+    }
+  }
+  strip.show();
+
+  // ---------------------------------------------------------------------
+  // 3) READ INCOMING IMAGE DATA FROM PC => PRINT
+  // ---------------------------------------------------------------------
+  // If the browser is sending an image, read 4 bytes for length, then read
+  // the full image into `buffer`, and call `printImageData()`.
   while (Serial.available()) {
-    // If we haven't started reading image length, read that first
+    // If we're not reading an image yet, get the 4-byte length
     if (!readingImage && totalBytesToRead == 0) {
-      // For example, we read 4 bytes for length:
       static uint8_t lengthBytes[4];
       static uint8_t lengthByteCount = 0;
 
       lengthBytes[lengthByteCount++] = Serial.read();
 
-      // Once we have 4 bytes, interpret them as length
       if (lengthByteCount == 4) {
         totalBytesToRead = (uint32_t)lengthBytes[0] |
                            ((uint32_t)lengthBytes[1] << 8) |
                            ((uint32_t)lengthBytes[2] << 16) |
                            ((uint32_t)lengthBytes[3] << 24);
+
         lengthByteCount = 0;
-        readingImage = true;
-        bytesRead = 0;
+        readingImage    = true;
+        bytesRead       = 0;
 
         Serial.println("Receiving image data...");
       }
     }
-    // 2. Else read the image bytes
+    // Otherwise, read the actual image bytes
     else if (readingImage) {
       if (bytesRead < totalBytesToRead) {
         buffer[bytesRead++] = Serial.read();
       } else {
-        // We either read everything, or ran out of space
-        Serial.read(); // discard extra if any
+        // If extra bytes come in, discard
+        Serial.read();
       }
 
-      // If we reached the total length
+      // Once we've received the full length
       if (bytesRead == totalBytesToRead) {
-        // We have the full image data in 'buffer'
         Serial.println("Done receiving image");
-        readingImage = false;
-        // Now print it
+        readingImage     = false;
+        // Print
         printImageData(buffer, totalBytesToRead);
+        // Reset for next possible image
         totalBytesToRead = 0;
-        bytesRead = 0;
+        bytesRead        = 0;
       }
     }
   }
